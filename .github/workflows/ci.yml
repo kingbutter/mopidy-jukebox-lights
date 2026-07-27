@@ -17,25 +17,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # setuptools-scm needs tags to derive a version
+          fetch-depth: 0        # setuptools-scm derives the version from tags
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
 
-      # Importing mopidy.core pulls in the GStreamer GObject bindings, so the
-      # test job needs them even though nothing here plays audio.
-      - name: Install GStreamer bindings
+      # This package imports mopidy.core, which pulls in GStreamer via
+      # PyGObject. Note that apt's python3-gi installs into the *system*
+      # interpreter's dist-packages, which the setup-python interpreter cannot
+      # see -- so PyGObject has to come from pip. apt still supplies the C
+      # libraries, the build headers, and the GObject typelibs it reads at
+      # runtime.
+      - name: Install GStreamer libraries and headers
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            python3-gi gir1.2-glib-2.0 gir1.2-gstreamer-1.0 \
-            gir1.2-gst-plugins-base-1.0 libcairo2-dev libgirepository1.0-dev
+            pkg-config python3-dev \
+            libgirepository1.0-dev libcairo2-dev \
+            libglib2.0-dev libgstreamer1.0-dev \
+            gir1.2-glib-2.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          # pygobject 3.52+ requires girepository-2.0, which Ubuntu 24.04 does
+          # not ship; 3.5x below that builds against girepository-1.0.
+          # Mopidy 3.x still imports pkg_resources, removed in setuptools 81.
+          pip install "pygobject<3.52" "setuptools<81"
           pip install -e ".[test]"
+
+      - name: Sanity check the GStreamer bindings
+        run: |
+          python -c "import gi; gi.require_version('Gst','1.0'); from gi.repository import Gst; print('pygobject', gi.__version__)"
+          python -c "from mopidy.core import CoreListener; print('mopidy.core OK')"
 
       - name: Test
         run: pytest -q --cov --cov-report=term-missing
@@ -51,66 +67,17 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install build twine
-      - run: python -m build
+      - run: python -m build          # pure-python wheel; no gi needed to build
       - run: twine check dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  # Which index should this build go to? Decided in a shell step rather than
-  # a GitHub expression: contains(github.ref, 'a') matches every ref, because
-  # "refs/tags/" itself contains an "a". That silently sends clean release
-  # tags to TestPyPI and never to PyPI.
-  decide:
-    needs: build
-    runs-on: ubuntu-latest
-    outputs:
-      channel: ${{ steps.pick.outputs.channel }}
-    steps:
-      - id: pick
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            CHANNEL=test
-          elif [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
-            # PEP 440 pre-release markers straight after the version numbers.
-            if printf '%s' "$GITHUB_REF_NAME" \
-                 | grep -Eq '^v?[0-9]+(\.[0-9]+)*([._-]?(rc|a|b|alpha|beta|dev|pre))'; then
-              CHANNEL=test
-            else
-              CHANNEL=prod
-            fi
-          else
-            CHANNEL=none
-          fi
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "Publishing channel: $CHANNEL"
-
-  # TestPyPI is a separate service with its own account and its own trusted
-  # publisher registration. Pre-release tags (v1.0.0rc1) and manual runs go
-  # here; only clean version tags reach real PyPI.
-  publish-test:
-    needs: [build, decide]
-    if: needs.decide.outputs.channel == 'test'
-    runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          # TestPyPI refuses to overwrite an existing version, and a failed
-          # release job is noisier than a skipped file.
-          skip-existing: true
-
   publish:
-    needs: [build, decide]
-    if: needs.decide.outputs.channel == 'prod'
+    # Trusted Publishing (OIDC) -- no API token stored anywhere.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
