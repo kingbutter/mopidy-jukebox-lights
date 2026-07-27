@@ -7,29 +7,35 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Mopidy 3 and Mopidy 4 need different environments and neither runner image
+# can host both:
+#   * Mopidy 4 declares requires-python >=3.13 AND needs GStreamer >= 1.26.2.
+#   * ubuntu-latest (24.04) ships GStreamer 1.24.2, so Mopidy 4 cannot run there.
+#   * debian:trixie ships 1.26.2 -- and is the platform this actually deploys to.
+# So: Mopidy 3 on the hosted runner, Mopidy 4 in a trixie container.
+
 jobs:
-  test:
+  mopidy3:
+    name: "Mopidy 3 · Python ${{ matrix.python }}"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # setuptools-scm derives the version from tags
+          fetch-depth: 0          # setuptools-scm derives the version from tags
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
           cache: pip
 
-      # This package imports mopidy.core, which pulls in GStreamer via
-      # PyGObject. Note that apt's python3-gi installs into the *system*
-      # interpreter's dist-packages, which the setup-python interpreter cannot
-      # see -- so PyGObject has to come from pip. apt still supplies the C
-      # libraries, the build headers, and the GObject typelibs it reads at
-      # runtime.
+      # apt's python3-gi installs into the *system* interpreter's
+      # dist-packages, which the setup-python interpreter cannot see. So the
+      # Python binding comes from pip; apt supplies the C libraries, the build
+      # headers, and the GObject typelibs read at runtime.
       - name: Install GStreamer libraries and headers
         run: |
           sudo apt-get update -qq
@@ -42,13 +48,12 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          # pygobject 3.52+ requires girepository-2.0, which Ubuntu 24.04 does
-          # not ship; 3.5x below that builds against girepository-1.0.
-          # Mopidy 3.x still imports pkg_resources, removed in setuptools 81.
+          # pygobject 3.52+ needs girepository-2.0, absent on Ubuntu 24.04.
+          # Mopidy 3 imports pkg_resources, removed in setuptools 81.
           pip install "pygobject<3.52" "setuptools<81"
           pip install -e ".[test]"
 
-      - name: Sanity check the GStreamer bindings
+      - name: Sanity check the bindings
         run: |
           python -c "import gi; gi.require_version('Gst','1.0'); from gi.repository import Gst; print('pygobject', gi.__version__)"
           python -c "from mopidy.core import CoreListener; print('mopidy.core OK')"
@@ -56,8 +61,48 @@ jobs:
       - name: Test
         run: pytest -q --cov --cov-report=term-missing
 
+  mopidy4:
+    name: "Mopidy 4 · Debian trixie"
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      # git must exist before checkout, otherwise the action falls back to a
+      # tarball download with no .git directory and setuptools-scm cannot
+      # derive a version.
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install dependencies
+        run: |
+          apt-get install -y -qq --no-install-recommends \
+            python3 python3-pip python3-venv python3-gi python3-gi-cairo \
+            gir1.2-glib-2.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+            gstreamer1.0-plugins-base
+          # --system-site-packages so the venv can see apt's python3-gi, which
+          # is not sensibly pip-installable. Same arrangement the jukebox uses.
+          python3 -m venv --system-site-packages /tmp/venv
+          /tmp/venv/bin/pip install --quiet --upgrade pip
+          /tmp/venv/bin/pip install -e ".[test]"
+
+      - name: Show what we are testing against
+        run: |
+          /tmp/venv/bin/python -c "import mopidy; print('mopidy', mopidy.__version__)"
+          gst-inspect-1.0 --version | head -2 || true
+
+      - name: Test
+        run: /tmp/venv/bin/pytest -q --cov --cov-report=term-missing
+
   build:
-    needs: test
+    needs: [mopidy3, mopidy4]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +112,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install build twine
-      - run: python -m build          # pure-python wheel; no gi needed to build
+      - run: python -m build      # pure-python wheel; no GStreamer needed
       - run: twine check dist/*
       - uses: actions/upload-artifact@v4
         with:
