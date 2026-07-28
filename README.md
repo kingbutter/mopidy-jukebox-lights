@@ -70,3 +70,4 @@ only while nothing is playing. Remove the file and it comes back. Set
 
 - Original author: [King Butter](https://github.com/kingbutter)
 - Current maintainer: [King Butter](https://github.com/kingbutter)
+x

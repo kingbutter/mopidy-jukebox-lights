@@ -36,7 +36,12 @@ jukeboxlights = "mopidy_jukebox_lights:Extension"
 [tool.setuptools_scm]
 # Version comes from the git tag, so a release is 'git tag v1.0.1 && push'.
 # Nothing to bump by hand, nothing to get out of sync with PyPI.
-version_scheme = "post-release"
+#
+# no-local-version matters for TestPyPI: the default scheme appends a local
+# identifier (1.0.1.dev4+g3f3dafd) and PyPI rejects any version carrying one.
+# Without this, every untagged upload fails. Untagged builds become
+# 1.0.1.dev4, which sorts *before* 1.0.1 -- correct for a pre-release.
+local_scheme = "no-local-version"
 fallback_version = "0.0.0"   # building from an sdist with no git history
 
 [tool.setuptools.packages.find]
