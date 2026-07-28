@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: "Upload this build to TestPyPI"
+        type: boolean
+        default: false
 
 # Mopidy 3 and Mopidy 4 need different environments and neither runner image
 # can host both:
@@ -23,11 +28,11 @@ jobs:
       matrix:
         python: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0          # setuptools-scm derives the version from tags
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -74,7 +79,7 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends git ca-certificates
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -105,21 +110,46 @@ jobs:
     needs: [mopidy3, mopidy4]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install build twine
       - run: python -m build      # pure-python wheel; no GStreamer needed
       - run: twine check dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
 
+  # TestPyPI on every push to main, and on demand from the Actions tab. Gives
+  # you a real 'pip install -i https://test.pypi.org/simple/' rehearsal before
+  # anything reaches the real index. Versions are 1.0.1.devN, derived from
+  # commit distance, so each push is unique; skip-existing covers re-runs.
+  publish-testpypi:
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.publish_testpypi)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
   publish:
+    # The real index, only on a version tag.
     # Trusted Publishing (OIDC) -- no API token stored anywhere.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -128,7 +158,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: dist
           path: dist/
