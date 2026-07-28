@@ -121,7 +121,25 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install build twine
+      - run: pip install build twine trove-classifiers
+
+      # twine check does NOT validate classifiers; PyPI rejects an unknown one
+      # with a 400 at upload time, after the whole pipeline has run. Catch it
+      # here instead. (There is no "Framework :: Mopidy" classifier, however
+      # much it feels like there should be.)
+      - name: Validate classifiers
+        run: |
+          python - <<'EOF'
+          import sys, tomllib
+          from trove_classifiers import classifiers as valid
+          declared = tomllib.load(open("pyproject.toml","rb"))["project"].get("classifiers", [])
+          bad = [c for c in declared if c not in valid]
+          for c in declared:
+              print(("  ok      " if c in valid else "  INVALID ") + c)
+          if bad:
+              sys.exit(f"\nNot valid trove classifiers: {bad}")
+          EOF
+
       - run: python -m build      # pure-python wheel; no GStreamer needed
       - run: twine check dist/*
 

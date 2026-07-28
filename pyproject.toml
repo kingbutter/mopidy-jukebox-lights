@@ -10,14 +10,21 @@ requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "King Butter" }]
-keywords = ["mopidy", "jukebox", "music", "kiosk"]
+keywords = ["mopidy", "mopidy-extension", "music", "wled", "led", "esp32", "lighting"]
 dynamic = ["version"]
 classifiers = [
+    # NB: there is no "Framework :: Mopidy" classifier -- PyPI validates
+    # against the official trove list and rejects the upload with a 400 if you
+    # invent one. Mopidy's registry finds extensions by the distribution name
+    # containing "Mopidy" plus the mopidy.ext entry point, not by classifier.
+    "Development Status :: 4 - Beta",
     "Environment :: No Input/Output (Daemon)",
-    "Framework :: Mopidy",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Players",
 ]
 dependencies = ["Mopidy>=3.4", "Pykka>=3.0", "Pillow>=9.0", "tornado>=6.0"]
