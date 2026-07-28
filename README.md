@@ -1,6 +1,8 @@
+<img src="https://raw.githubusercontent.com/kingbutter/mopidy-jukebox-lights/main/media/banner.jpg" alt="Mopidy-JukeboxLights">
+
 # Mopidy-JukeboxLights
 
-[![PyPI](https://img.shields.io/pypi/v/Mopidy-JukeboxLights)](https://pypi.org/project/Mopidy-JukeboxLights/)
+[![PyPI](https://img.shields.io/pypi/v/Mopidy-JukeboxLights?label=PyPI&color=e0a020)](https://pypi.org/project/Mopidy-JukeboxLights/)
 [![CI](https://github.com/kingbutter/mopidy-jukebox-lights/actions/workflows/ci.yml/badge.svg)](https://github.com/kingbutter/mopidy-jukebox-lights/actions)
 
 A [Mopidy](https://mopidy.com/) extension that drives
@@ -44,7 +46,7 @@ enabled = true
 wled_host = 172.20.25.44       # IP or host:port of your WLED device
 brightness = 160               # 1-255
 idle_after = 45                # seconds of silence before the idle effect
-idle_color = 240,168,48        # amber
+idle_color = amber             # name, hex, or r,g,b
 accent_segments = 1,2,3        # segment ids that get the accent color
 follow_display = true
 display_flag = /run/jukebox/display-off
@@ -53,6 +55,18 @@ display_flag = /run/jukebox/display-off
 Segments are read from WLED at startup, so a strip run in one uncut piece with
 hidden stretches behind a door frame works without any config here — define
 the visible runs as WLED segments and this follows them.
+
+### Idle color
+
+`idle_color` accepts a name, a hex string, or an `r,g,b` triplet — `amber`,
+`#f0a830`, `f0a830`, `#fa3` and `240,168,48` are all the same colour. Named
+options: `amber`, `warm-white`, `candle`, `gold`, `red`, `oxblood`, `pink`,
+`purple`, `blue`, `cyan`, `teal`, `green`, `lime`, `white`.
+
+The status page has a swatch grid and a colour picker that apply immediately,
+so you can try colours against the actual cabinet before committing one to
+`mopidy.conf`. Changes made there are not persisted — the config file stays
+the source of truth across restarts, and the page shows the line to paste.
 
 ### Turning the lights off with the screen
 

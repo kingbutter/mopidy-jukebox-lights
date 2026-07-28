@@ -16,9 +16,47 @@ from .color import pick_palette
 logger = logging.getLogger(__name__)
 
 
+# Named colors for the idle effect. Warm tones read best through a diffuser;
+# the cool ones are here because some cabinets suit them.
+NAMED_COLORS = {
+    "amber": (240, 168, 48),
+    "warm-white": (255, 197, 143),
+    "candle": (255, 147, 41),
+    "gold": (255, 215, 0),
+    "red": (220, 20, 20),
+    "oxblood": (140, 30, 45),
+    "pink": (255, 60, 140),
+    "purple": (150, 40, 210),
+    "blue": (30, 90, 255),
+    "cyan": (0, 200, 220),
+    "teal": (0, 190, 160),
+    "green": (30, 210, 60),
+    "lime": (160, 240, 40),
+    "white": (255, 255, 255),
+    "off": (0, 0, 0),
+}
+
+
 def _parse_rgb(text, fallback=(240, 168, 48)):
+    """Accept a name, a hex string, or r,g,b -- people should not have to
+    look up that amber is 240,168,48."""
+    if text is None:
+        return fallback
+    raw = str(text).strip().lower()
+    if not raw:
+        return fallback
+
+    if raw in NAMED_COLORS:
+        return NAMED_COLORS[raw]
+
+    hexish = raw.lstrip("#")
+    if len(hexish) in (3, 6) and all(c in "0123456789abcdef" for c in hexish):
+        if len(hexish) == 3:
+            hexish = "".join(c * 2 for c in hexish)
+        return tuple(int(hexish[i:i + 2], 16) for i in (0, 2, 4))
+
     try:
-        parts = [int(p) for p in str(text).replace(" ", "").split(",")]
+        parts = [int(p) for p in raw.replace(" ", "").split(",")]
         if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
             return tuple(parts)
     except (ValueError, TypeError):
@@ -242,6 +280,16 @@ class LightsFrontend(pykka.ThreadingActor, CoreListener):
             "last_accent": list(self.wled.last_accent) if self.wled.last_accent else None,
             "cached_artwork": len(self._art),
         }
+
+    def set_idle_color(self, value):
+        """Change the idle color now. Not persisted -- mopidy.conf remains the
+        source of truth across restarts, and the status page says so."""
+        rgb = _parse_rgb(value, self.idle_rgb)
+        self.idle_rgb = rgb
+        self.wled.last = None          # force a repaint on the next tick
+        if not self._playing:
+            self._q.put(("idle", None))
+        return list(rgb)
 
     def run_test(self):
         """Cycle a few colors so wiring can be checked without music."""

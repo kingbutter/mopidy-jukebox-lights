@@ -20,7 +20,7 @@ import json
 import tornado.web
 from pykka import ActorRegistry
 
-from .frontend import LightsFrontend
+from .frontend import NAMED_COLORS, LightsFrontend
 
 
 def _actor():
@@ -79,6 +79,18 @@ _PAGE = """<!DOCTYPE html>
          text-transform:uppercase;margin:0 8px 8px 0}}
   button:active{{background:var(--amber);color:#2b2118}}
   code{{background:var(--night2);padding:2px 7px}}
+  .swatches{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 1.2em}}
+  .swatches form{{display:inline}}
+  .sw{{width:58px;height:58px;border:2px solid #0a0507;padding:0;cursor:pointer;
+      position:relative}}
+  .sw:hover{{border-color:var(--paper)}}
+  .sw.on{{border-color:var(--paper);box-shadow:0 0 0 2px var(--amber)}}
+  .sw span{{position:absolute;left:0;right:0;bottom:-17px;font-size:9px;
+           letter-spacing:.06em;color:var(--chrome2);text-transform:uppercase}}
+  .picker{{display:flex;gap:8px;align-items:center;margin-bottom:.8em}}
+  .picker input[type=color]{{width:64px;height:48px;background:none;
+    border:1px solid var(--chrome2);padding:2px}}
+  .hint{{font-size:13px;line-height:1.8}}
   p{{color:var(--chrome);font-size:14px}}
   a{{color:var(--amber)}}
 </style>
@@ -98,6 +110,18 @@ _PAGE = """<!DOCTYPE html>
 
   <h2>Settings</h2>
   <table>{settings}</table>
+
+  <h2>Idle color</h2>
+  <p>What the tubes breathe when nothing is playing.</p>
+  <div class="swatches">{swatches}</div>
+  <form method="post" action="idle-color" class="picker">
+    <input type="color" name="value" value="{idle_hex}">
+    <button>Use this color</button>
+  </form>
+  <p class="hint">Applies immediately. To make it survive a restart, put it in
+     <code>mopidy.conf</code>:<br>
+     <code>[jukeboxlights]</code><br>
+     <code>idle_color = {idle_hex}</code></p>
 
   <h2>Actions</h2>
   <form method="post" action="test"><button>Test colors</button></form>
@@ -194,10 +218,26 @@ class IndexHandler(tornado.web.RequestHandler):
             ("Artwork cached", st["cached_artwork"]),
         ])
 
+        idle = tuple(st["idle_color"])
+        idle_hex = "#%02x%02x%02x" % idle
+        sw = []
+        for name, rgb in NAMED_COLORS.items():
+            if name == "off":
+                continue
+            sel = " on" if tuple(rgb) == idle else ""
+            sw.append(
+                f'<form method="post" action="idle-color">'
+                f'<input type="hidden" name="value" value="{name}">'
+                f'<button class="sw{sel}" title="{name}" '
+                f'style="background:rgb{tuple(rgb)}"><span>{name}</span></button>'
+                f"</form>"
+            )
+
         self.write(_PAGE.format(
             host=st["wled_host"], accent=accent, swatch=swatch,
             mode_label=label, color_label=color_label,
             why=_why(st), segments=segs, settings=settings,
+            swatches="".join(sw), idle_hex=idle_hex,
         ))
 
 
@@ -231,10 +271,26 @@ class ActionHandler(tornado.web.RequestHandler):
         self.redirect("./")
 
 
+class IdleColorHandler(tornado.web.RequestHandler):
+    def post(self):
+        ref = _actor()
+        if ref is None:
+            self.set_status(503)
+            self.write("lights frontend not running")
+            return
+        value = self.get_body_argument("value", default="")
+        ref.proxy().set_idle_color(value).get(timeout=3)
+        self.redirect("./")
+
+    def get(self):
+        self.redirect("./")
+
+
 def app_factory(config, core):
     return [
         (r"/", IndexHandler),
         (r"/status.json", StatusHandler),
         (r"/test", ActionHandler, {"action": "run_test"}),
         (r"/rediscover", ActionHandler, {"action": "rediscover"}),
+        (r"/idle-color", IdleColorHandler),
     ]
