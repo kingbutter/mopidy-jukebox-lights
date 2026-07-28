@@ -109,6 +109,11 @@ jobs:
   build:
     needs: [mopidy3, mopidy4]
     runs-on: ubuntu-latest
+    outputs:
+      # Distinguishes a real release tag from a release candidate. Without
+      # this, 'refs/tags/v...' matches v1.0.0rc1 exactly as well as v1.0.0 and
+      # a candidate goes straight to the real index.
+      prerelease: ${{ steps.classify.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -119,6 +124,19 @@ jobs:
       - run: pip install build twine
       - run: python -m build      # pure-python wheel; no GStreamer needed
       - run: twine check dist/*
+
+      - name: Is this a final release tag?
+        id: classify
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && \
+                "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_REF_NAME} is a final release -> PyPI"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_REF_NAME} is not a final release -> TestPyPI"
+          fi
+
       - uses: actions/upload-artifact@v6
         with:
           name: dist
@@ -131,8 +149,8 @@ jobs:
   publish-testpypi:
     if: >-
       github.ref == 'refs/heads/main' ||
-      (github.event_name == 'workflow_dispatch' &&
-       inputs.publish_testpypi)
+      (github.ref_type == 'tag' && needs.build.outputs.prerelease == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_testpypi)
     needs: build
     runs-on: ubuntu-latest
     environment: testpypi
@@ -149,9 +167,11 @@ jobs:
           skip-existing: true
 
   publish:
-    # The real index, only on a version tag.
+    # The real index, and ONLY for a final release tag. A candidate such as
+    # v1.0.0rc1 routes to TestPyPI instead -- PyPI never lets a version number
+    # be reused, so an accidental upload there is permanent.
     # Trusted Publishing (OIDC) -- no API token stored anywhere.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' && needs.build.outputs.prerelease == 'false' 
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
